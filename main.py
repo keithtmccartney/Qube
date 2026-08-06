@@ -1735,6 +1735,7 @@ if __name__ == "__main__":
 
         QTimer.singleShot(250, qube.window.focus_chat_composer_if_ready)
         QTimer.singleShot(0, qube.window.schedule_auto_state_backup)
+        QTimer.singleShot(450, qube.window.maybe_show_whats_new)
 
     # Keep a strong reference; otherwise StartupSplashController is GC'd and startup timers never fire.
     app._startup_splash_controller = bootstrap_with_splash(

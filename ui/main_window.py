@@ -4414,6 +4414,80 @@ class MainWindow(QMainWindow):
             )
         elif action_id == "open_settings_ai_cognition":
             self._open_settings_section("ai.models", anchor="cognition")
+        elif action_id == "open_whats_new":
+            self._show_whats_new_from_notification()
+        elif action_id == "open_version_history":
+            self._open_version_history_dialog()
+
+    def maybe_show_whats_new(self) -> None:
+        if getattr(self, "_whats_new_prompt_done", False):
+            return
+        if getattr(self, "_run_scenario_path", None) or getattr(self, "_compare_sessions", None):
+            self._whats_new_prompt_done = True
+            return
+
+        from core.releases.whats_new import pending_whats_new_manifests
+
+        unseen = pending_whats_new_manifests()
+        if not unseen:
+            self._whats_new_prompt_done = True
+            return
+
+        self._pending_whats_new_manifests = unseen
+        QTimer.singleShot(0, self._present_whats_new_dialog)
+
+    def _present_whats_new_dialog(self) -> None:
+        if getattr(self, "_whats_new_modal_shown", False):
+            return
+        manifests = getattr(self, "_pending_whats_new_manifests", None) or []
+        if not manifests:
+            self._whats_new_prompt_done = True
+            return
+        self._whats_new_modal_shown = True
+        from core.releases.whats_new import acknowledge_whats_new
+        from ui.components.release_history_dialog import show_whats_new_dialog
+
+        acknowledged = show_whats_new_dialog(
+            self,
+            manifests,
+            is_dark=getattr(self, "_is_dark_theme", True),
+        )
+        if acknowledged:
+            acknowledge_whats_new()
+        else:
+            latest = manifests[-1].version
+            self.show_app_notification(
+                AppNotificationRequest(
+                    title=f"What's new in Qube {latest}",
+                    body=manifests[-1].summary or "See highlights from this update.",
+                    action_label="View",
+                    action_id="open_whats_new",
+                    auto_dismiss_ms=12000,
+                    dedupe_key=f"whats_new_{latest}",
+                    category="update",
+                )
+            )
+        self._whats_new_prompt_done = True
+
+    def _show_whats_new_from_notification(self) -> None:
+        from core.releases.whats_new import acknowledge_whats_new, pending_whats_new_manifests
+        from ui.components.release_history_dialog import show_whats_new_dialog
+
+        manifests = pending_whats_new_manifests() or []
+        if not manifests:
+            self._open_version_history_dialog()
+            return
+        if show_whats_new_dialog(
+            self,
+            manifests,
+            is_dark=getattr(self, "_is_dark_theme", True),
+        ):
+            acknowledge_whats_new()
+
+    def _open_version_history_dialog(self) -> None:
+        from ui.components.release_history_dialog import show_version_history_dialog
+
+        show_version_history_dialog(self, is_dark=getattr(self, "_is_dark_theme", True))
 
     def _open_settings_section(
         self,

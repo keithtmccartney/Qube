@@ -74,11 +74,19 @@ def build_section(host, *, is_dark: bool) -> QWidget:
     )
     host.check_for_updates_btn.clicked.connect(host._on_check_for_updates_clicked)
 
+    host.view_version_history_btn = QPushButton("Version history")
+    apply_brand_primary(host.view_version_history_btn, icon_name="fa5s.history")
+    host.view_version_history_btn.setToolTip(
+        "Browse searchable release notes and What's New highlights for each version."
+    )
+    host.view_version_history_btn.clicked.connect(host._on_view_version_history_clicked)
+
     _add_about_action_to_form(
         updates_form,
         host.software_updates_hint_lbl,
         host.check_for_updates_btn,
     )
+    add_settings_full_width_row(updates_form, make_settings_action_row(host.view_version_history_btn))
     layout.addWidget(updates_card)
 
     return widget

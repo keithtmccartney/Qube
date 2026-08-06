@@ -248,7 +248,7 @@ SETTINGS_TOUR_WIDGET_ATTRS: dict[str, tuple[str, ...]] = {
         "replay_local_llm_tour_btn",
         "open_composer_mention_guide_btn",
     ),
-    "settings.about": ("check_for_updates_btn", "open_qube_website_btn"),
+    "settings.about": ("check_for_updates_btn", "view_version_history_btn", "open_qube_website_btn"),
     "settings.contact_feedback": ("report_bug_btn", "request_feature_btn"),
     "settings.privacy_data": (
         "privacy_data_overview_hint",

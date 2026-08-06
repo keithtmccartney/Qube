@@ -76,6 +76,12 @@ class UpdateHandlersMixin:
         ]
         if result.release_notes:
             lines.extend(["", result.release_notes])
+        lines.extend(
+            [
+                "",
+                "After updating, open Settings → About → Version history for full release notes.",
+            ]
+        )
         if result.download_url:
             lines.extend(["", f"Download:\n{result.download_url}"])
         elif result.release_page_url:

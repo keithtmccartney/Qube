@@ -1,7 +1,7 @@
 {
   "schema": "qube.help_corpus_manifest.v1",
   "locale": "en",
-  "corpus_version": "1.0.31",
+  "corpus_version": "1.0.32",
   "min_app_version": "1.0.0",
   "max_app_version": null,
   "collection_id": "qube.documentation",
@@ -1926,6 +1926,29 @@
       "related": [
         "features.conversations",
         "faq.conversations_vs_memory",
+        "index"
+      ]
+    },
+    {
+      "id": "release.app_changelog",
+      "path": "release/app-changelog.md",
+      "title": "What's new in Qube",
+      "type": "release",
+      "tags": [
+        "release",
+        "whats-new",
+        "version-history",
+        "app-changelog"
+      ],
+      "synonyms": [
+        "app release notes",
+        "qube changelog",
+        "version history",
+        "what changed in qube"
+      ],
+      "related": [
+        "release.whats_new",
+        "workflows.update_qube",
         "index"
       ]
     },

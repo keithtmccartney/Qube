@@ -14,6 +14,7 @@ from ui.views.settings.handlers.persistence import PersistenceHandlersMixin
 from ui.views.settings.handlers.prestige_menu import PrestigeMenuMixin
 from ui.views.settings.handlers.privacy_data import PrivacyDataHandlersMixin
 from ui.views.settings.handlers.styling import StylingMixin
+from ui.views.settings.handlers.releases import ReleaseHandlersMixin
 from ui.views.settings.handlers.support import SupportHandlersMixin
 from ui.views.settings.handlers.themes import ThemesHandlersMixin
 from ui.views.settings.handlers.updates import UpdateHandlersMixin
@@ -34,6 +35,7 @@ __all__ = [
     "PrestigeMenuMixin",
     "PrivacyDataHandlersMixin",
     "StylingMixin",
+    "ReleaseHandlersMixin",
     "SupportHandlersMixin",
     "ThemesHandlersMixin",
     "UpdateHandlersMixin",

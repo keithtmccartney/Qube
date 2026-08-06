@@ -276,8 +276,10 @@ def _doc_intent_boost(doc: dict[str, Any], signals: _QuerySignals, query: str) -
         boost += 1.6
     if signals.preset and doc_id == "workflows.create_knowledge_preset":
         boost += 1.5
+    if signals.whats_new and doc_id == "release.app_changelog":
+        boost += 2.4
     if signals.whats_new and doc_id == "release.whats_new":
-        boost += 2.0
+        boost += 1.6
     if signals.whats_new and doc_id == "features.settings.help":
         boost -= 0.8
     if "migration" in _normalize(query) and doc_id == "release.migration_guide":
