@@ -1,0 +1,10 @@
+{
+  "schema": "qube.release_index.v1",
+  "releases": [
+    {"version": "1.3.0", "date": "2026-08-04", "file": "1.3.0.json"},
+    {"version": "1.2.9", "date": "2026-08-03", "file": "1.2.9.json"},
+    {"version": "1.2.8", "date": "2026-08-02", "file": "1.2.8.json"},
+    {"version": "1.2.7", "date": "2026-08-02", "file": "1.2.7.json"},
+    {"version": "1.2.6", "date": "2026-08-01", "file": "1.2.6.json"}
+  ]
+}

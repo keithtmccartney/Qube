@@ -1,0 +1,72 @@
+{
+  "schema": "qube.release_manifest.v1",
+  "version": "1.2.6",
+  "date": "2026-08-01",
+  "summary": "MCP capability integration, Library Pro depth, and a redesigned Settings layout with updated in-app help.",
+  "changes": [
+    {
+      "id": "mcp-capability-integration",
+      "category": "new",
+      "title": "MCP capability integration",
+      "summary": "Connect MCP servers, manage capability permissions, and use capability tokens in the composer.",
+      "user_impact": [
+        "Add and manage MCP servers from Settings → Integrations",
+        "Review and approve provider capabilities before use",
+        "Attach capabilities in the composer with @ tokens and INSPECT steps"
+      ],
+      "developer_notes": [
+        "Capability registry and invoke path",
+        "Consent controller and session egress review",
+        "Stdio MCP client and provider registry"
+      ],
+      "capabilities_affected": ["cap:provider:mcp", "cap:consent:preset"],
+      "ado_feature_ids": [57],
+      "documentation": ["Settings → Integrations", "@help integrations"]
+    },
+    {
+      "id": "library-pro-depth",
+      "category": "new",
+      "title": "Library Pro depth",
+      "summary": "Structural chunking, precision indexing and retrieval, and Pro license gating for advanced Library features.",
+      "user_impact": [
+        "Higher-precision Library search and indexing with Pro",
+        "Improved PDF text normalization for imports"
+      ],
+      "capabilities_affected": ["cap:library:pro", "cap:license:pro"],
+      "documentation": ["Library", "@help library-pro-depth"]
+    },
+    {
+      "id": "settings-redesign",
+      "category": "new",
+      "title": "Settings redesign",
+      "summary": "Settings split into focused sections with sticky titles, collapsible cards, and clearer hierarchy.",
+      "user_impact": [
+        "Privacy & data, Diagnostics, and License each have dedicated Settings sections",
+        "Advanced JSON editor moved to a slim Advanced section",
+        "Faster navigation with sticky section titles and collapsible cards"
+      ],
+      "documentation": ["Settings"]
+    },
+    {
+      "id": "readme-install-gpu",
+      "category": "improved",
+      "title": "Install guidance updates",
+      "summary": "README install guidance expanded for WinGet, Chocolatey GPU commands, and macOS Homebrew tap upgrades.",
+      "user_impact": [
+        "Clearer GPU and package-manager install instructions in README"
+      ],
+      "documentation": ["README"]
+    },
+    {
+      "id": "settings-ci-stability",
+      "category": "fixed",
+      "title": "Settings CI stability",
+      "summary": "Settings lazy-load and theme-manager subscription cleanup for stable Windows CI.",
+      "user_impact": [],
+      "developer_notes": [
+        "Lazy-load cleanup for settings handlers",
+        "UI test reliability for nav sidebar theme toggle"
+      ]
+    }
+  ]
+}

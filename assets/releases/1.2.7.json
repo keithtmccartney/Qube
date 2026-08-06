@@ -1,0 +1,48 @@
+{
+  "schema": "qube.release_manifest.v1",
+  "version": "1.2.7",
+  "date": "2026-08-02",
+  "summary": "Conversation turn index for long chats, plus routing diagnostics and transcript layout fixes.",
+  "changes": [
+    {
+      "id": "conversation-turn-index",
+      "category": "new",
+      "title": "Conversation turn index",
+      "summary": "Jump between user prompts in long conversations with a compact turn rail beside the transcript.",
+      "user_impact": [
+        "Click turn ticks beside the transcript to jump to any user prompt",
+        "Use Ctrl+↑ and Ctrl+↓ to move between turns",
+        "Hover a tick for turn number and prompt preview with smooth scroll"
+      ],
+      "documentation": ["Conversations"]
+    },
+    {
+      "id": "routing-debug-logging",
+      "category": "improved",
+      "title": "Routing debug logging",
+      "summary": "Routing debug logging is enabled by default to simplify RAG and memory routing diagnosis.",
+      "user_impact": [
+        "Easier diagnosis of retrieval and memory routing issues from standard logs"
+      ],
+      "developer_notes": ["Default-on routing debug logging", "Hardened RAG and memory capability routing"]
+    },
+    {
+      "id": "prompts-ui-hang",
+      "category": "fixed",
+      "title": "Prompts UI hang",
+      "summary": "Fixed a hang when opening or using the prompts UI.",
+      "user_impact": [
+        "Prompts UI opens and responds without freezing"
+      ]
+    },
+    {
+      "id": "turn-index-layout",
+      "category": "fixed",
+      "title": "Turn index layout",
+      "summary": "Transcript turn-index layout preserves column width and responsive layout modes.",
+      "user_impact": [
+        "Turn rail stays aligned at 800px and 1200px layout breakpoints"
+      ]
+    }
+  ]
+}

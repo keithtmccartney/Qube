@@ -1,0 +1,52 @@
+{
+  "schema": "qube.release_manifest.v1",
+  "version": "1.3.0",
+  "date": "2026-08-04",
+  "summary": "Offline Pro license verification in shipped builds, plus maintainer tooling for signing keys and batch license issuance.",
+  "changes": [
+    {
+      "id": "prod-license-signing",
+      "category": "new",
+      "title": "Production license signing",
+      "summary": "Shipped builds embed the production signing key so Pro licenses verify fully offline.",
+      "user_impact": [
+        "Import Pro licenses without contacting a server on first verify",
+        "Production `.qube-license` files validate against the embedded production key"
+      ],
+      "developer_notes": [
+        "Embedded `qube-prod-1` public key in `assets/licensing/signing_keys.json`"
+      ],
+      "capabilities_affected": ["cap:license:verify"],
+      "documentation": ["Settings → License", "docs/licensing"]
+    },
+    {
+      "id": "signing-key-cli",
+      "category": "new",
+      "title": "Signing key generator",
+      "summary": "Maintainers can generate Ed25519 signing keys and register public keys for pack verification.",
+      "user_impact": [],
+      "developer_notes": [
+        "New `tools/generate_qube_signing_key.py` CLI",
+        "Registers public keys in signing_keys.json"
+      ]
+    },
+    {
+      "id": "batch-license-issuance",
+      "category": "new",
+      "title": "Batch license issuance",
+      "summary": "Issue multiple customer licenses in one run with a CSV manifest and per-customer key files.",
+      "user_impact": [],
+      "developer_notes": [
+        "`issue_qube_license.py --count` writes CSV manifest plus QUBE1 serial key files"
+      ]
+    },
+    {
+      "id": "licensing-cli-bootstrap",
+      "category": "improved",
+      "title": "Licensing CLI bootstrap",
+      "summary": "Licensing maintainer scripts bootstrap the repo root when run directly.",
+      "user_impact": [],
+      "developer_notes": ["Licensing CLI tools add repo root to sys.path when invoked as scripts"]
+    }
+  ]
+}

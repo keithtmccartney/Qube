@@ -1,0 +1,49 @@
+{
+  "schema": "qube.release_manifest.v1",
+  "version": "1.2.9",
+  "date": "2026-08-03",
+  "summary": "Reading font choices for Conversations and Library, plus Themes UX polish and Pro gating for theme pack actions.",
+  "changes": [
+    {
+      "id": "reading-font-setting",
+      "category": "new",
+      "title": "Reading font setting",
+      "summary": "Choose a reading font for Conversations and Library previews from bundled OFL fonts or your system.",
+      "user_impact": [
+        "Pick Inter, Source Sans 3, IBM Plex Sans, Literata, or a system font in Settings → Themes",
+        "Preview reading typography before applying it across Conversations and Library"
+      ],
+      "documentation": ["Settings → Themes"]
+    },
+    {
+      "id": "themes-pro-gate",
+      "category": "new",
+      "title": "Themes Pro gating",
+      "summary": "Save, import, and export custom theme actions require Pro+.",
+      "user_impact": [
+        "Pro+ license required to save, import, or export custom themes",
+        "Expanded wallpaper preset catalog with improved swatch borders"
+      ],
+      "capabilities_affected": ["cap:license:pro"]
+    },
+    {
+      "id": "settings-help-crosslinks",
+      "category": "improved",
+      "title": "Settings help cross-links",
+      "summary": "General settings help, tour, and @mentions cross-links updated for composer defaults and GPU caveats.",
+      "user_impact": [
+        "Clearer in-app guidance when changing composer defaults or Discovery GPU settings"
+      ],
+      "documentation": ["@help settings"]
+    },
+    {
+      "id": "system-font-picker-icons",
+      "category": "fixed",
+      "title": "System font picker excludes icon fonts",
+      "summary": "The system font browser no longer lists Font Awesome and other icon-font families on Windows.",
+      "user_impact": [
+        "System font list shows readable text fonts only on Windows"
+      ]
+    }
+  ]
+}

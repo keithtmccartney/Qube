@@ -1,0 +1,51 @@
+{
+  "schema": "qube.release_manifest.v1",
+  "version": "1.2.8",
+  "date": "2026-08-02",
+  "summary": "Pro license gating for advanced integrations, Deep Research profiles and PDF export, and assistant message export from Conversations.",
+  "changes": [
+    {
+      "id": "pro-integration-gating",
+      "category": "new",
+      "title": "Pro license gating for integrations",
+      "summary": "Custom STT/TTS/embedding paths, alternate wakeword libraries, and MCP Filesystem integrations require Pro.",
+      "user_impact": [
+        "Pro license unlocks custom model paths and MCP Filesystem integrations",
+        "Settings UI shows clear Pro gates with license sync on import or remove"
+      ],
+      "capabilities_affected": ["cap:license:pro", "cap:provider:mcp"],
+      "documentation": ["Settings → Integrations", "Settings → License"]
+    },
+    {
+      "id": "deep-research-profiles",
+      "category": "new",
+      "title": "Deep Research profiles",
+      "summary": "Research profiles, PDF report export, and Pro-gated advanced Deep Research features.",
+      "user_impact": [
+        "Run structured Deep Research with selectable profiles",
+        "Export research reports to PDF",
+        "Advanced Deep Research features require Pro"
+      ],
+      "capabilities_affected": ["cap:research:deep"]
+    },
+    {
+      "id": "assistant-message-export",
+      "category": "new",
+      "title": "Export assistant messages",
+      "summary": "Export assistant replies from Conversations as Markdown or PDF.",
+      "user_impact": [
+        "Export individual assistant messages for sharing or archival",
+        "Choose Markdown or PDF format from Conversations"
+      ],
+      "documentation": ["Conversations"]
+    },
+    {
+      "id": "settings-lazy-load-ci",
+      "category": "fixed",
+      "title": "Settings lazy-load CI stability",
+      "summary": "Fixed Settings lazy-load hang when wakeword catalog sync runs against mocked audio workers in tests.",
+      "user_impact": [],
+      "developer_notes": ["Settings lazy-load no longer blocks CI when wakeword catalog is mocked"]
+    }
+  ]
+}
