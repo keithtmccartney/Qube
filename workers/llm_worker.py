@@ -361,6 +361,7 @@ class LLMWorker(QThread):
         self.store = store
         self.db = db_manager
         self._native_engine = native_engine
+        self._notify_native_hardware_reload = False
         self._sidecar_client = sidecar_client
         self._last_native_job_cancelled = False
         self.engine_mode = get_engine_mode()
@@ -5195,7 +5196,7 @@ class LLMWorker(QThread):
         set_llm_context_limit(self.context_window)
         logger.debug(f"Context Window updated to {self.context_window}")
         if getattr(self, "engine_mode", DEFAULT_ENGINE_MODE) == "internal":
-            self.refresh_native_model_from_settings()
+            self.refresh_native_model_from_settings(notify_hardware_reload=True)
 
     def set_output_token_limit_enabled(self, enabled: bool) -> None:
         self.output_token_limit_enabled = bool(enabled)
@@ -5418,10 +5419,23 @@ class LLMWorker(QThread):
                 time.sleep(0.05)
         self._native_engine.unload_model()
 
-    def refresh_native_model_from_settings(self) -> None:
+    def refresh_native_model_from_settings(
+        self,
+        *,
+        autoload: bool = False,
+        notify_hardware_reload: bool = False,
+    ) -> "NativeModelRefreshOutcome":
         """Load or reload the native .gguf from QSettings (path, GPU layers, context)."""
+        from core.native_model_autoload import (
+            NativeModelRefreshOutcome,
+            evaluate_native_model_refresh,
+        )
+
+        noop = NativeModelRefreshOutcome(attempted=False)
         if getattr(self, "engine_mode", DEFAULT_ENGINE_MODE) != "internal" or not self._native_engine:
-            return
+            return noop
+        if notify_hardware_reload:
+            self._notify_native_hardware_reload = True
         if self.isRunning():
             self.cancel_generation()
             # Give the current turn a brief window to unwind so model load can proceed quickly.
@@ -5430,23 +5444,27 @@ class LLMWorker(QThread):
                     break
                 time.sleep(0.05)
         path = resolve_internal_model_path(get_internal_model_path())
-        n_gpu = get_internal_n_gpu_layers()
-        n_threads = get_internal_n_threads()
-        n_ctx = int(getattr(self, "context_window", 4096))
+        outcome = evaluate_native_model_refresh(path, autoload=autoload)
+        if outcome.missing_display_name:
+            if self._native_engine:
+                self._native_engine.unload_model()
+            if outcome.missing_shards:
+                self.status_update.emit(
+                    f"Native engine: missing shard files for {outcome.missing_display_name}"
+                )
+            else:
+                self.status_update.emit("Native engine: select a .gguf in Model Manager")
+            return outcome
         if not path or not os.path.isfile(path):
             if self._native_engine:
                 self._native_engine.unload_model()
             self.status_update.emit("Native engine: select a .gguf in Model Manager")
-            return
-        missing = missing_gguf_shards(path)
-        if missing:
-            if self._native_engine:
-                self._native_engine.unload_model()
-            self.status_update.emit(
-                f"Native engine: missing shard files ({len(missing)} missing) - download all parts"
-            )
-            return
+            return NativeModelRefreshOutcome(attempted=autoload)
+        n_gpu = get_internal_n_gpu_layers()
+        n_threads = get_internal_n_threads()
+        n_ctx = int(getattr(self, "context_window", 4096))
         self._native_engine.load_model(path, n_gpu, n_ctx, n_threads)
+        return NativeModelRefreshOutcome(attempted=autoload)
 
     def reload_model(self):
         """External: status only; Internal: reload .gguf with current settings."""

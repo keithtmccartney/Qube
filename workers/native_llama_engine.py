@@ -33,10 +33,7 @@ class _StopEventUnion:
         return any(e.is_set() for e in self._events)
 
 
-try:
-    from llama_cpp import Llama
-except ImportError:  # pragma: no cover
-    Llama = None  # type: ignore
+from core.llama_cpp_import import get_llama_class
 
 from core.app_settings import (
     get_engine_mode,
@@ -261,11 +258,12 @@ class NativeLlamaEngine(QThread):
         self._last_retrieval_context: str = ""
         self._inference_transparency_native: Optional[Dict[str, Any]] = None
 
-    def stop_engine(self) -> None:
-        """Request shutdown and wait for the thread to finish."""
+    def stop_engine(self, *, wait_ms: int = 30_000) -> None:
+        """Request shutdown and optionally wait for the thread to finish."""
         self._stop.set()
         self._stamp_enqueue_meta({"op": "shutdown"}, priority=EnginePriority.control)
-        self.wait(30_000)
+        if wait_ms > 0:
+            self.wait(wait_ms)
 
     def request_cancel_generation(self) -> None:
         self._cancel_generation = True
@@ -623,10 +621,6 @@ class NativeLlamaEngine(QThread):
         )
 
     def run(self) -> None:
-        if Llama is None:
-            logger.error("llama_cpp not available; native engine cannot start.")
-            return
-
         while not self._stop.is_set():
             try:
                 cmd = self._cmd_queue.get(timeout=0.2)
@@ -653,6 +647,51 @@ class NativeLlamaEngine(QThread):
                 if op not in ("generate", "chat_once"):
                     self._end_active_job(cmd)
 
+    def _instantiate_llama(
+        self,
+        Llama,
+        *,
+        path: str,
+        n_gpu_layers: int,
+        n_ctx: int,
+        n_threads: int,
+    ):
+        from core.native_llama_load import is_retryable_native_load_error, native_load_attempts
+
+        last_exc: Exception | None = None
+        for gpu_layers, ctx, label in native_load_attempts(n_gpu_layers, n_ctx):
+            try:
+                if label != "requested":
+                    if label == "cpu_ctx2048":
+                        self.status_update.emit("Retrying load on CPU with smaller context…")
+                    else:
+                        self.status_update.emit("Retrying load on CPU (GPU layers = 0)…")
+                init_kw = dict(
+                    model_path=path,
+                    n_gpu_layers=gpu_layers,
+                    n_ctx=ctx,
+                    n_threads=n_threads,
+                    verbose=False,
+                )
+                init_kw.update(llama_chat_format_kwarg())
+                llama = Llama(**init_kw)
+                if label != "requested":
+                    logger.warning(
+                        "[Native] Loaded with fallback %s (n_gpu_layers=%s n_ctx=%s)",
+                        label,
+                        gpu_layers,
+                        ctx,
+                    )
+                return llama, gpu_layers, ctx, label
+            except Exception as exc:
+                last_exc = exc
+                if not is_retryable_native_load_error(exc):
+                    raise
+                continue
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Native model load produced no result")
+
     def _do_load(self, cmd: dict) -> None:
         path = resolve_internal_model_path(cmd.get("path") or "")
         n_gpu = int(cmd.get("n_gpu_layers", 0))
@@ -676,21 +715,25 @@ class NativeLlamaEngine(QThread):
             return
 
         self._do_unload()
+        Llama = get_llama_class()
+        if Llama is None:
+            self.load_finished.emit(False, "llama_cpp not available in this build")
+            self.status_update.emit("Native engine: llama_cpp unavailable")
+            return
         try:
             self.status_update.emit("Loading native model…")
-            init_kw = dict(
-                model_path=path,
+            self._llama, n_gpu, n_ctx, load_label = self._instantiate_llama(
+                Llama,
+                path=path,
                 n_gpu_layers=n_gpu,
                 n_ctx=n_ctx,
                 n_threads=n_threads,
-                verbose=False,
             )
-            init_kw.update(llama_chat_format_kwarg())
-            self._llama = Llama(**init_kw)
             self._model_path = path
             self._n_gpu_layers = n_gpu
             self._n_ctx = n_ctx
             self._n_threads = n_threads
+            self._load_fallback_label = load_label
             try:
                 self._model_reasoning_profile = detect_model_reasoning_profile(
                     self._llama,
@@ -887,8 +930,11 @@ class NativeLlamaEngine(QThread):
             except Exception as e:
                 logger.debug("[ModelRouter] upsert_profile_from_loaded_model failed: %s", e)
             self._cancel_generation = False
+            ready_msg = f"Native model ready: {os.path.basename(path)}"
+            if getattr(self, "_load_fallback_label", "requested") != "requested":
+                ready_msg += " (CPU fallback — adjust GPU layers in Settings)"
             self.load_finished.emit(True, os.path.basename(path))
-            self.status_update.emit(f"Native model ready: {os.path.basename(path)}")
+            self.status_update.emit(ready_msg)
             # Behavior profiling runs on a separate queued op so chat/generate is not
             # blocked behind load-time ablation (Gemma 4 can hang in diagnostic completions).
             self._stamp_enqueue_meta(

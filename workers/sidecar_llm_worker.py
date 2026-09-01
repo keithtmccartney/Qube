@@ -43,12 +43,9 @@ from core.sidecar_prompts import (
 )
 from core.sidecar_types import SidecarResult, SidecarTask
 
-logger = logging.getLogger("Qube.SidecarLLMWorker")
+from core.llama_cpp_import import get_llama_class
 
-try:
-    from llama_cpp import Llama
-except ImportError:
-    Llama = None  # type: ignore
+logger = logging.getLogger("Qube.SidecarLLMWorker")
 
 try:
     import queue as _queue_mod
@@ -273,6 +270,7 @@ class SidecarLlmWorker(QThread):
         gc.collect()
 
     def _load_cognition_model(self, path: str) -> tuple[bool, str]:
+        Llama = get_llama_class()
         if Llama is None:
             return False, "llama_cpp_unavailable"
         if not path or not os.path.isfile(path):
@@ -346,29 +344,24 @@ class SidecarLlmWorker(QThread):
         finally:
             self._reloading = False
 
-    def run(self) -> None:
-        if Llama is None:
-            logger.error("[Sidecar] llama_cpp not available")
-            self._sync_telemetry_runtime(degraded_reason="llama_cpp_unavailable")
-            self._run_degraded_queue_loop()
-            return
-
+    def _try_load_cognition_model_if_needed(self) -> tuple[bool, str]:
+        if self.model_loaded:
+            return True, ""
         path = resolve_active_cognition_path()
         if not os.path.isfile(path):
             if not self._warned_missing:
                 logger.warning("[Sidecar] Model not found at %s — sidecar disabled", path)
                 self._warned_missing = True
             self._sync_telemetry_runtime(degraded_reason="model_not_found")
-            self._run_degraded_queue_loop()
-            return
-
+            return False, "model_not_found"
         ok, msg = self._load_cognition_model(path)
-        if not ok:
+        if ok:
+            self._sync_telemetry_runtime()
+        else:
             self._sync_telemetry_runtime(degraded_reason=msg)
-            self._run_degraded_queue_loop()
-            return
-        self._sync_telemetry_runtime()
+        return ok, msg
 
+    def run(self) -> None:
         while not self._stop.is_set():
             try:
                 cmd = self._cmd_queue.get(timeout=0.2)
@@ -390,8 +383,10 @@ class SidecarLlmWorker(QThread):
                 self._fail_command(cmd, "reloading")
                 continue
             if not self.model_loaded:
-                self._fail_command(cmd, "model_unavailable")
-                continue
+                ok, msg = self._try_load_cognition_model_if_needed()
+                if not ok:
+                    self._fail_command(cmd, msg or "model_unavailable")
+                    continue
             try:
                 if op == "title":
                     self._do_title(cmd)

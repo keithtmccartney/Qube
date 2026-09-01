@@ -141,8 +141,13 @@ class Qube:
         tick: Callable[[str], None],
         embedder: EmbeddingModel | None,
     ) -> None:
+        from core.winget_validation import is_winget_validation_mode
+
         if embedder is not None:
             self.embedder = embedder
+        elif is_winget_validation_mode():
+            # Splash may skip embedder; avoid blocking CI on fastembed model download.
+            self.embedder = None
         else:
             tick("Loading embeddings…")
             try:
@@ -163,11 +168,13 @@ class Qube:
         self.reindex_worker = None
         self._reindex_revert_embedding_mode: str | None = None
         self._reindex_target_mode: str | None = None
+        self._startup_autoload_outcome = None
 
     def _boot_core_workers(self, tick: Callable[[str], None]) -> None:
         from core.bootstrap_manifest import BootstrapModelId
         from core.bootstrap_missing_models import stt_model_available
         from core.bootstrap_selection import get_selected_model_ids
+        from core.winget_validation import is_winget_validation_mode
 
         tick("Starting core services…")
         self.audio_worker = AudioListenerWorker()
@@ -193,7 +200,10 @@ class Qube:
             sidecar_client=self.sidecar_client,
         )
         self.tts_worker = TTSWorker()
-        self.gpu_monitor = GPUMonitor()
+        if is_winget_validation_mode():
+            self.gpu_monitor = None
+        else:
+            self.gpu_monitor = GPUMonitor()
         self.active_internet_worker = None
 
     def _boot_memory_workers(self, tick: Callable[[str], None]) -> None:
@@ -276,18 +286,27 @@ class Qube:
             self._start_reindex_for_mode(get_embedding_mode())
 
     def _boot_autoload_model(self, tick: Callable[[str], None]) -> None:
+        from core.winget_validation import is_winget_validation_mode
+
+        if is_winget_validation_mode():
+            return
         if (
             get_engine_mode() == "internal"
             and get_auto_load_last_model_on_startup()
             and bool(get_internal_model_path())
         ):
             tick("Loading language model…")
-            self.llm_worker.refresh_native_model_from_settings()
+            self._startup_autoload_outcome = (
+                self.llm_worker.refresh_native_model_from_settings(autoload=True)
+            )
 
     def _boot_runtime(self, tick: Callable[[str], None]) -> None:
+        from core.winget_validation import is_winget_validation_mode
+
         tick("Starting audio and voice…")
         self.audio_worker.start()
-        self.tts_worker.load_voice(resolve_boot_tts_path())
+        if not is_winget_validation_mode():
+            self.tts_worker.load_voice(resolve_boot_tts_path())
         tick("Ready")
         self._pending_enrichment_context = {}
         self._pending_turn_session_id: str | None = None
@@ -1424,6 +1443,11 @@ class Qube:
         """Called automatically when the application is closing."""
         logger.info("Initiating graceful shutdown...")
 
+        if sys.platform == "win32":
+            from core.windows_install_mutex import release_install_mutex
+
+            release_install_mutex()
+
         # 0. Model Manager — Hub search/README/list/download QThreads can block exit if still running
         mm = self.window._model_manager_view
         if mm is not None:
@@ -1591,9 +1615,30 @@ class Qube:
                     )
 
 
-if __name__ == "__main__":
+def run_application(
+    *,
+    app: QubeApplication | None = None,
+    early_splash=None,
+    single_instance=None,
+) -> int:
     args = parse_boot_args()
     configure_user_model_paths()
+
+    from core.bootstrap_trace import configure_bootstrap_trace, record_startup_progress
+
+    configure_bootstrap_trace(args)
+
+    from core.winget_validation import (
+        apply_winget_validation_bootstrap_shortcut,
+        configure_winget_validation_mode,
+        is_winget_smoke_validation,
+        is_winget_validation_mode,
+        log_validation_startup_summary,
+        write_smoke_result,
+    )
+
+    configure_winget_validation_mode(args)
+    shortcut_applied = apply_winget_validation_bootstrap_shortcut()
     # Optional: The Windows Taskbar App ID fix we discussed
     if sys.platform == "win32":
         import ctypes
@@ -1601,12 +1646,73 @@ if __name__ == "__main__":
         myappid = f"dagaza.qube.app.{__version__}"
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
-    # 1. PyQt6 high DPI handling
-    QubeApplication.setHighDpiScaleFactorRoundingPolicy(
-        QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
+    activation_target: dict[str, Qube | None] = {"qube": None}
 
-    app = QubeApplication(sys.argv)
+    def _focus_existing_instance() -> bool:
+        """Raise visible UI; return False so a relaunch can take over a headless zombie."""
+        from core.platform.window_activation import activate_toplevel_window
+        from core.startup_exit import (
+            arm_force_process_exit,
+            startup_exit_requested,
+        )
+
+        if startup_exit_requested():
+            guard = getattr(app, "_single_instance_guard", None)
+            if guard is not None and hasattr(guard, "release"):
+                guard.release()
+            arm_force_process_exit(delay_s=0.1)
+            if app is not None:
+                app.quit()
+            return False
+
+        qube = activation_target["qube"]
+        if qube is not None and getattr(qube, "window", None) is not None:
+            try:
+                activate_toplevel_window(qube.window)
+                return True
+            except RuntimeError:
+                pass
+
+        splash_controller = getattr(app, "_startup_splash_controller", None)
+        if splash_controller is not None and hasattr(splash_controller, "request_activation"):
+            if splash_controller.request_activation():
+                return True
+
+        if early_splash is not None and hasattr(early_splash, "request_activation"):
+            if early_splash.request_activation():
+                return True
+
+        if app is not None:
+            for widget in app.topLevelWidgets():
+                try:
+                    if widget.isVisible():
+                        activate_toplevel_window(widget)
+                        return True
+                except RuntimeError:
+                    continue
+
+        logger.warning(
+            "Duplicate launch with no visible Qube window; yielding so a fresh start can bind."
+        )
+        guard = getattr(app, "_single_instance_guard", None) if app is not None else None
+        if guard is not None and hasattr(guard, "release"):
+            guard.release()
+        arm_force_process_exit(delay_s=0.25)
+        if app is not None:
+            app.quit()
+        return False
+
+    if single_instance is not None and hasattr(single_instance, "set_activation_handler"):
+        single_instance.set_activation_handler(_focus_existing_instance)
+        if app is not None:
+            app._single_instance_guard = single_instance
+
+    if app is None:
+        QubeApplication.setHighDpiScaleFactorRoundingPolicy(
+            QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+        app = QubeApplication(sys.argv)
+
     app.setQuitOnLastWindowClosed(False)
     apply_linux_desktop_integration(app)
     repo_root = install_root()
@@ -1676,6 +1782,10 @@ if __name__ == "__main__":
 
     selected_models = effective_bootstrap_selection()
     needs_consent = should_show_bootstrap_consent()
+    log_validation_startup_summary(
+        shortcut_applied=shortcut_applied,
+        needs_consent=needs_consent,
+    )
     if args.mock_bootstrap_download:
         os.environ["QUBE_BOOTSTRAP_MOCK_DOWNLOAD"] = "1"
         logger.info("Bootstrap mock downloads enabled (--mock-bootstrap-download).")
@@ -1700,6 +1810,7 @@ if __name__ == "__main__":
         )
 
     def _on_qube_ready(qube: Qube) -> None:
+        activation_target["qube"] = qube
         qube.window._qube = qube
         if is_bootstrap_completed():
             if hasattr(qube.window, "voice_input_toggle"):
@@ -1731,6 +1842,13 @@ if __name__ == "__main__":
                 qube.window._setup_trace_diff_debug_window()
             qube.window.schedule_scenario_replay()
         qube.show()
+        outcome = getattr(qube, "_startup_autoload_outcome", None)
+        if outcome is not None and hasattr(qube.window, "handle_startup_autoload_outcome"):
+            from PyQt6.QtCore import QTimer
+
+            QTimer.singleShot(0, lambda: qube.window.handle_startup_autoload_outcome(outcome))
+        if is_winget_smoke_validation():
+            write_smoke_result(boot_complete=True)
         from PyQt6.QtCore import QTimer
 
         QTimer.singleShot(250, qube.window.focus_chat_composer_if_ready)
@@ -1738,6 +1856,13 @@ if __name__ == "__main__":
         QTimer.singleShot(450, qube.window.maybe_show_whats_new)
 
     # Keep a strong reference; otherwise StartupSplashController is GC'd and startup timers never fire.
+    if is_winget_smoke_validation():
+        record_startup_progress(
+            "before_splash_bootstrap",
+            mock_downloads=bool(args.mock_bootstrap_download),
+            needs_consent=needs_consent,
+            selected_count=len(selected_models),
+        )
     app._startup_splash_controller = bootstrap_with_splash(
         repo_root=repo_root,
         build_app_fn=_build_qube,
@@ -1745,9 +1870,20 @@ if __name__ == "__main__":
         selected_models=selected_models,
         needs_consent=needs_consent,
         mock_downloads=bool(args.mock_bootstrap_download),
+        early_splash=early_splash,
     )
     logger.info("Entering Qt event loop.")
-    sys.exit(app.exec())
+    code = app.exec()
+    from core.startup_exit import force_process_exit_now, startup_exit_requested
+
+    if startup_exit_requested():
+        # Non-daemon worker / native threads started mid-bootstrap can keep the
+        # interpreter alive after quit with no window or tray icon.
+        force_process_exit_now(int(code) if isinstance(code, int) else 0)
+    return code
 
 
-    
+if __name__ == "__main__":
+    from qube_entry import run
+
+    sys.exit(run())

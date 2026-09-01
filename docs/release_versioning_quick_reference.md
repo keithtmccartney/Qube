@@ -15,6 +15,28 @@ A git tag `vX.Y.Z` triggers **Build & Release** (`.github/workflows/release.yml`
 
 **Patch numbers (`1.2.1`, `1.2.2`, …) should mean “users can install this build,” not “we fixed another test on main.”**
 
+### Hotfix lane (same minor line, avoid burning `1.3.4`, `1.3.5`, …)
+
+When **`1.3.N` is already published** (GitHub Release live) but you need a small packaging-only fix (WinGet validation, installer smoke, etc.), use a **hotfix patch in the 30+ range** on that minor:
+
+```text
+1.3.3   →  first public 1.3.3 release
+1.3.31  →  hotfix #1 on the 1.3.3 line (e.g. WinGet CUDA Defender)
+1.3.32  →  hotfix #2 if needed
+1.3.33  →  hotfix #3 (WinGet validation guard + CUDA install smoke)
+1.3.34  →  hotfix #4 (smoke_dist.ps1 path fix for release CI)
+1.3.35  →  hotfix #5 (CUDA validation smoke instrumentation + non-modal CI failures)
+1.3.36  →  hotfix #6 (splash boot trace + full CI boot-state dump on CUDA smoke failure)
+1.3.37  →  hotfix #7 (frozen settings schema path + validation-mode consent bypass)
+1.3.38  →  hotfix #8 (skip embedder/TTS reload in validation-mode phased boot)
+1.3.39  →  hotfix #9 (streamed search-preset downloads + early splash contrast; tag did not publish — CI hung)
+1.3.40  →  hotfix #10 (release CI install smoke + ships 1.3.39 fixes)
+```
+
+Semver compares numerically (`1.3.31` > `1.3.3`), so package managers treat hotfixes as upgrades. **Reserve `1.3.4`–`1.3.29` for the next feature patch** on the line, or jump to **`1.4.0`** when the minor bumps.
+
+Do **not** use `-rc` / `-h1` suffixes for these — WinGet and Chocolatey expect plain `major.minor.patch`.
+
 ---
 
 ## What each version means

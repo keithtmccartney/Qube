@@ -7,7 +7,7 @@ How to remove Qube and its local data on each platform.
 ## Before you uninstall
 
 - **Back up if needed** — In Qube, use **Settings → Knowledge → Diagnostics → Export knowledge pack** to save `~/.qube/knowledge-pack.json` (credentials redacted). Models and library files live under `~/.qube/` and are deleted on a full uninstall.
-- **Quit Qube** — Close the app before removing files manually. The macOS and Windows uninstallers quit Qube for you.
+- **Quit Qube on Windows** — Closing the main window **minimizes to the system tray**; the app keeps running. Use **Exit Qube** from the tray icon, then confirm **Qube.exe** is gone in Task Manager before uninstalling manually. The Inno uninstaller (`unins000.exe`) also stops Qube automatically when you uninstall from **Settings → Apps**.
 
 ---
 
@@ -15,8 +15,17 @@ How to remove Qube and its local data on each platform.
 
 ### Installed from the release installer (recommended)
 
-1. Open **Settings → Apps → Installed apps** (or **Add or remove programs**).
-2. Select **Qube** → **Uninstall**.
+1. **Exit Qube** from the system tray (**Exit Qube**), or confirm no **Qube.exe** process in Task Manager.
+2. Open **Settings → Apps → Installed apps** (or **Add or remove programs**).
+3. Select **Qube** → **Uninstall**.
+
+The uninstaller removes application files under:
+
+```text
+%LOCALAPPDATA%\Programs\Qube\
+```
+
+(including `Qube.exe` and `_internal\`). If anything remains, Qube was likely still running during uninstall — exit the app and run `unins000.exe` again, or delete that folder after ending **Qube.exe** in Task Manager.
 
 Or run the Inno Setup uninstaller directly:
 
@@ -44,13 +53,16 @@ choco uninstall qube -y
 
 ### User data after Windows uninstall
 
-The installer removes the application under `%LOCALAPPDATA%\Programs\Qube\`. User data (models, library, memory, settings) is stored separately under:
+The installer removes the application under `%LOCALAPPDATA%\Programs\Qube\` only. User data is stored in **two** locations on Windows:
 
 ```text
-%LOCALAPPDATA%\Qube\
+%LOCALAPPDATA%\Qube\          — models, library DB, logs
+%USERPROFILE%\.qube\          — settings.json and other support files
 ```
 
-Delete that folder if you want a completely clean removal.
+When you uninstall from **Settings → Apps**, the uninstaller asks whether to remove this data as well. Choose **Yes** for a completely clean removal, or **No** (default) to keep models and settings for a future reinstall.
+
+Silent uninstall (`/VERYSILENT`) **never** deletes user data; remove the folders above manually if needed.
 
 ---
 

@@ -101,9 +101,13 @@ jobs:
             /tr http://timestamp.digicert.com /td SHA256 $exe
 
       - name: Smoke test dist EXE
-        if: matrix.variant == 'cpu'
         shell: pwsh
         run: scripts/release/smoke_dist.ps1
+
+      - name: Verify Vulkan bundle layout
+        if: matrix.variant == 'vulkan'
+        shell: pwsh
+        run: scripts/release/verify_windows_vulkan_bundle.ps1
 
       - name: Verify CUDA bundle layout
         if: matrix.variant == 'cuda'
@@ -115,6 +119,13 @@ jobs:
 
       - name: Build installer
         run: iscc /DMyAppVersion=${{ steps.version.outputs.version }} /DMyAppVariant=${{ matrix.variant }} installer\qube.iss
+
+      - name: CUDA silent install launch smoke (WinGet validation guard)
+        if: matrix.variant == 'cuda'
+        shell: pwsh
+        run: |
+          scripts/release/smoke_installed_cuda.ps1 `
+            -SetupPath "installer/output/Qube-${{ steps.version.outputs.version }}-cuda-Setup.exe"
 
       - name: Sign installer
         if: vars.ENABLE_CODE_SIGNING == 'true'
@@ -166,6 +177,7 @@ jobs:
 
       - name: Smoke test installer upgrade
         if: matrix.variant == 'cpu'
+        timeout-minutes: 20
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
@@ -180,8 +192,11 @@ jobs:
 
       - name: Silent install, launch, and uninstall
         if: matrix.variant == 'cpu'
+        timeout-minutes: 20
         shell: pwsh
-        run: scripts/release/smoke_installed.ps1
+        run: |
+          scripts/release/smoke_installed.ps1 `
+            -SetupPath "installer/output/Qube-${{ steps.version.outputs.version }}-Setup.exe"
 
       - name: Compute SHA256
         if: matrix.variant == 'cpu'

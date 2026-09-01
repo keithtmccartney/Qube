@@ -108,7 +108,7 @@ from workers.hf_model_meta_worker import HfModelMetaWorker
 from workers.hf_readme_worker import HfReadmeWorker
 from workers.hf_repo_files_worker import HfRepoFilesWorker
 from workers.model_download_worker import HuggingFaceGgufDownloadWorker
-from core.paths import install_root
+from core.paths import resource_path
 
 # Extra display data on Hub .gguf combo rows (file size, right-aligned in popup).
 HUB_FILE_COMBO_SIZE_ROLE = int(Qt.ItemDataRole.UserRole) + 42
@@ -131,8 +131,36 @@ HUB_ROW_HARDWARE_FIT_ROLE = int(Qt.ItemDataRole.UserRole) + 11
 HUB_SEARCH_PAGE_SIZE = 20
 
 
-def _model_manager_project_root() -> Path:
-    return install_root()
+def _resolve_bundled_asset_url(asset_url: str) -> Path | None:
+    """Resolve ``/assets/...`` (or absolute path) to a bundled read-only file."""
+    raw = str(asset_url or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if path.is_file():
+        return path
+    rel = raw.lstrip("/")
+    if not rel:
+        return None
+    candidate = resource_path(*rel.split("/"))
+    return candidate if candidate.is_file() else None
+
+
+def _resolve_hub_brand_logo(logo_url: str) -> Path | None:
+    """Resolve branding logo path (/assets/..., absolute, or cached avatar file)."""
+    return _resolve_bundled_asset_url(logo_url)
+
+
+def _default_hub_fallback_logo() -> Path | None:
+    """Generic HF avatar when publisher logo is missing."""
+    for parts in (
+        ("assets", "logos", "hf-logo.svg"),
+        ("assets", "icons", "hf-logo.svg"),
+    ):
+        candidate = resource_path(*parts)
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _hub_file_combo_list_qss(theme) -> str:
@@ -503,6 +531,7 @@ class ModelManagerView(QWidget):
         self._hub_reachable: bool | None = None
         self._hub_status_detail: str = ""
         self._pending_download_retry: bool = False
+        self._pending_hub_redownload: tuple[str, str] | None = None
         self._tour_load_more_preview_active: bool = False
 
         os.makedirs(get_llm_models_dir(), exist_ok=True)
@@ -1881,7 +1910,7 @@ class ModelManagerView(QWidget):
             if is_dark
             else "hub_combo_chevron_light.svg"
         )
-        svg = _model_manager_project_root() / "assets" / "icons" / name
+        svg = resource_path("assets", "icons", name)
         if not svg.is_file():
             return
         self._hub_combo_chevron_pixmap = QIcon(str(svg)).pixmap(QSize(12, 12))
@@ -2030,17 +2059,14 @@ class ModelManagerView(QWidget):
         avatar = QLabel()
         avatar.setObjectName("HubModelRowAvatar")
         avatar.setFixedSize(24, 24)
-        root = _model_manager_project_root()
         branding_data = dict(branding or {})
         publisher_name = str(branding_data.get("name", "") or "").strip()
         branding_logo = str(branding_data.get("logo", "") or "").strip()
         logo_path = self._resolve_hub_brand_logo(branding_logo)
         is_official = bool(branding_data.get("official", False))
         if logo_path is None:
-            logo_path = root / "assets" / "logos" / "hf-logo.svg"
-            if not logo_path.is_file():
-                logo_path = root / "assets" / "icons" / "hf-logo.svg"
-        if logo_path.is_file():
+            logo_path = _default_hub_fallback_logo()
+        if logo_path is not None and logo_path.is_file():
             avatar.setPixmap(QIcon(str(logo_path)).pixmap(QSize(22, 22)))
         if is_official and publisher_name:
             avatar.setToolTip(f"Official model by {publisher_name}")
@@ -2142,17 +2168,7 @@ class ModelManagerView(QWidget):
         self._apply_hub_row_size_hint(item, row)
 
     def _resolve_hub_brand_logo(self, logo_url: str) -> Path | None:
-        """Resolve branding logo path (/assets/..., absolute, or cached avatar file)."""
-        logo = str(logo_url or "").strip()
-        if not logo:
-            return None
-        p = Path(logo)
-        if p.is_file():
-            return p
-        rel = logo.lstrip("/")
-        root = _model_manager_project_root()
-        candidate = root / rel
-        return candidate if candidate.is_file() else None
+        return _resolve_hub_brand_logo(logo_url)
 
     def _apply_detail_branding(self, branding: dict | None) -> None:
         if not hasattr(self, "detail_branding_row"):
@@ -2195,7 +2211,7 @@ class ModelManagerView(QWidget):
                 variant_name = str(variant.get("name", "") or "").strip()
                 variant_logo = self._resolve_hub_brand_logo(str(variant.get("logo", "") or ""))
                 if variant_logo is None:
-                    variant_logo = self._resolve_hub_brand_logo("/assets/logos/hf-logo.svg")
+                    variant_logo = _default_hub_fallback_logo()
                 if variant_name and variant_logo is not None:
                     self.detail_variant_logo.setPixmap(
                         QIcon(str(variant_logo)).pixmap(QSize(16, 16))
@@ -3079,6 +3095,67 @@ class ModelManagerView(QWidget):
         self._update_gpu_fit_status()
         self._sync_download_action_state()
         self._refresh_download_options_card_geometry()
+        self._try_complete_pending_hub_redownload(seq)
+
+    def request_hub_redownload(self, repo_id: str, filename: str) -> None:
+        """Open a Hub repo and start downloading ``filename`` when the file list is ready."""
+        repo = str(repo_id or "").strip()
+        fname = Path(str(filename or "").strip()).name
+        if not repo or not fname:
+            return
+        self._pending_hub_redownload = (repo, fname)
+        if not self._select_hub_repo_by_id(repo):
+            self._detail_seq += 1
+            seq = self._detail_seq
+            self._current_repo_id = repo
+            if hasattr(self, "detail_title"):
+                self.detail_title.setText(repo)
+            if hasattr(self, "detail_source_btn"):
+                self.detail_source_btn.setVisible(True)
+            self._reload_hub_detail_workers(repo, seq)
+
+    def _select_hub_repo_by_id(self, repo_id: str) -> bool:
+        repo = str(repo_id or "").strip()
+        if not repo or not hasattr(self, "hub_model_list"):
+            return False
+        for row in range(self.hub_model_list.count()):
+            item = self.hub_model_list.item(row)
+            if item is None:
+                continue
+            candidate = str(
+                item.data(HUB_ROW_DOWNLOAD_REPO_ROLE) or item.data(HUB_ROW_REPO_ROLE) or ""
+            ).strip()
+            if candidate == repo:
+                self.hub_model_list.setCurrentItem(item)
+                return True
+        return False
+
+    def _try_complete_pending_hub_redownload(self, seq: int) -> None:
+        pending = getattr(self, "_pending_hub_redownload", None)
+        if not pending:
+            return
+        repo_id, filename = pending
+        if seq != self._detail_seq or self._current_repo_id.strip() != repo_id:
+            return
+        target = filename.lower()
+        if not hasattr(self, "hf_file_combo"):
+            self._pending_hub_redownload = None
+            return
+        for i in range(1, self.hf_file_combo.count()):
+            path = self.hf_file_combo.itemData(i)
+            if path and Path(str(path)).name.lower() == target:
+                self.hf_file_combo.blockSignals(True)
+                self.hf_file_combo.setCurrentIndex(i)
+                self.hf_file_combo.blockSignals(False)
+                self._pending_hub_redownload = None
+                self._update_download_selection_hint()
+                self._update_quant_rationale_label()
+                self._sync_download_action_state()
+                from PyQt6.QtCore import QTimer
+
+                QTimer.singleShot(0, self._start_download)
+                return
+        self._pending_hub_redownload = None
 
     def _on_hf_list_failed(self, err: object, seq: int) -> None:
         if seq != self._detail_seq:

@@ -19,6 +19,13 @@ logger = logging.getLogger("Qube.STTModels")
 
 BUNDLED_STT_MODEL_ID = "small"
 BUNDLED_STT_LABEL = "Whisper Small (bundled default)"
+BUNDLED_STT_HF_REPO = "Systran/faster-whisper-small"
+BUNDLED_WHISPER_WEIGHT_FILES = (
+    "config.json",
+    "tokenizer.json",
+    "vocabulary.txt",
+    "model.bin",
+)
 STT_SUBDIR = "stt"
 _HF_CACHE_PREFIX = "models--"
 
@@ -35,6 +42,11 @@ def get_stt_models_dir() -> str:
     path = models_root() / STT_SUBDIR
     path.mkdir(parents=True, exist_ok=True)
     return str(path)
+
+
+def bundled_whisper_dir() -> Path:
+    """Directory for bundled CTranslate2 Whisper ``small`` weights (not HF hub cache)."""
+    return Path(get_stt_models_dir()) / BUNDLED_STT_MODEL_ID
 
 
 def _normalize_path(path: str) -> str:
@@ -80,7 +92,20 @@ def iter_whisper_weight_dirs(stt_dir: Path | None = None) -> list[Path]:
 
 def bundled_whisper_present() -> bool:
     """True when the bundled Whisper small weights exist under ``~/.qube/models/stt/``."""
-    return bool(iter_whisper_weight_dirs())
+    return resolve_bundled_whisper_load_path() is not None
+
+
+def resolve_bundled_whisper_load_path() -> Path | None:
+    """Directory to pass to faster-whisper for the bundled default.
+
+    Prefers the flat ``stt/small/`` layout from bootstrap; falls back to legacy
+    Hugging Face hub-cache snapshots under ``stt/models--.../snapshots/``.
+    """
+    flat = bundled_whisper_dir()
+    if _looks_like_ct2_whisper_dir(flat):
+        return flat
+    dirs = iter_whisper_weight_dirs()
+    return dirs[0] if dirs else None
 
 
 def is_protected_stt_model(path: str) -> bool:

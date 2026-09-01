@@ -2760,6 +2760,43 @@ class MainWindow(QMainWindow):
             self.nav_models.setChecked(True)
             self._route_view(4, self.nav_models)
 
+    def handle_startup_autoload_outcome(self, outcome) -> None:
+        """Notify when startup autoload could not find the saved native .gguf."""
+        from core.native_model_autoload import (
+            NativeModelRefreshOutcome,
+            missing_autoload_model_notification,
+        )
+
+        if not isinstance(outcome, NativeModelRefreshOutcome) or not outcome.notify_user:
+            return
+        if not outcome.missing_display_name:
+            return
+        self.emit_notification(
+            missing_autoload_model_notification(
+                display_name=outcome.missing_display_name,
+                redownload_repo_id=outcome.redownload_repo_id,
+                redownload_filename=outcome.redownload_filename,
+                missing_shards=outcome.missing_shards,
+            )
+        )
+        if hasattr(self, "refresh_toolbar_native_model_dropdown"):
+            self.refresh_toolbar_native_model_dropdown()
+        sv = getattr(self, "_settings_view", None)
+        if sv is not None and hasattr(sv, "sync_active_native_model_label"):
+            sv.sync_active_native_model_label()
+
+    def _open_model_manager_for_redownload(self, repo_id: str, filename: str) -> None:
+        self._open_model_manager_page()
+
+        def _start() -> None:
+            view = self.ensure_model_manager_view()
+            if hasattr(view, "request_hub_redownload"):
+                view.request_hub_redownload(repo_id, filename)
+
+        from PyQt6.QtCore import QTimer
+
+        QTimer.singleShot(200, _start)
+
     def _open_local_model_picker_from_toolbar(self) -> None:
         """Expand the tools pane and open the toolbar Select AI Model menu."""
         self._restore_workspace_from_tray()
@@ -3126,8 +3163,9 @@ class MainWindow(QMainWindow):
 
     def _on_native_model_load_finished_ui(self, ok: bool, message: str) -> None:
         stale_ignored = False
-        if self._native_model_loading and self._pending_native_model_path:
-            pending_name = Path(self._pending_native_model_path).name
+        pending_path = self._pending_native_model_path
+        if self._native_model_loading and pending_path:
+            pending_name = Path(pending_path).name
             # Ignore stale completion from an older rapid selection.
             if ok and str(message or "").strip() and str(message).strip() != pending_name:
                 stale_ignored = True
@@ -3138,15 +3176,46 @@ class MainWindow(QMainWindow):
         self._native_model_loaded_success = bool(ok)
         self._pending_native_model_path = None
         self._set_native_model_progress_loading(False)
-        if not ok and "missing model shards" in str(message or "").lower():
+        if not ok:
+            if self._llm_worker and getattr(
+                self._llm_worker, "_notify_native_hardware_reload", False
+            ):
+                self._llm_worker._notify_native_hardware_reload = False
+            from core.native_load_errors import format_native_load_failure_dialog
+
             is_dark = getattr(self, "_is_dark_theme", True)
+            title, body = format_native_load_failure_dialog(
+                model_path=str(pending_path or ""),
+                error=str(message or ""),
+            )
             PrestigeDialog(
                 self,
-                "Missing model shards",
-                "This GGUF model is split into multiple shard files and some parts are missing.\n\n"
-                f"{str(message or '').strip()}",
+                title,
+                body,
                 is_dark=is_dark,
             ).exec()
+        elif self._llm_worker and getattr(
+            self._llm_worker, "_notify_native_hardware_reload", False
+        ):
+            from core.notification_types import native_model_reloaded_from_settings_event
+
+            self._llm_worker._notify_native_hardware_reload = False
+            model_name = str(message or "").strip()
+            if not model_name and pending_path:
+                model_name = Path(pending_path).name
+            cpu_fallback = False
+            if self._native_engine is not None:
+                cpu_fallback = (
+                    getattr(self._native_engine, "_load_fallback_label", "requested")
+                    != "requested"
+                )
+            self.emit_notification(
+                native_model_reloaded_from_settings_event(
+                    model_name=model_name,
+                    cpu_fallback=cpu_fallback,
+                )
+            )
+            self.update_status("Model reloaded with updated settings", force=True)
         self.refresh_toolbar_native_model_dropdown()
         if ok and self._run_scenario_path and not self._scenario_qube_phase_done:
             self.schedule_scenario_replay()
@@ -4381,6 +4450,15 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, _jump)
         elif action_id == "open_models":
             self._open_model_manager_page()
+        elif action_id.startswith("open_models_redownload"):
+            from core.native_model_autoload import decode_redownload_action_id
+
+            decoded = decode_redownload_action_id(action_id)
+            if decoded is None:
+                self._open_model_manager_page()
+            else:
+                repo_id, filename = decoded
+                self._open_model_manager_for_redownload(repo_id, filename)
         elif action_id == "open_local_model_picker":
             self._open_local_model_picker_from_toolbar()
         elif action_id == "open_library":

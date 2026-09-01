@@ -25,7 +25,7 @@ datas = [
     ("system_data", "system_data"),
 ]
 datas += collect_data_files("qtawesome", include_py_files=False)
-for _pkg in ("mf2py", "extruct", "recipe_scrapers"):
+for _pkg in ("mf2py", "extruct", "recipe_scrapers", "kokoro_onnx", "openwakeword"):
     try:
         datas += collect_data_files(_pkg, include_py_files=False)
     except Exception:
@@ -66,13 +66,13 @@ if _IS_MACOS:
     _excludes.append("pynvml")
 
 a = Analysis(
-    ["main.py"],
+    ["qube_entry.py"],
     pathex=["."],
     binaries=binaries,
     datas=datas,
     hiddenimports=_hidden_imports,
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=["pyi_rth_llama_cpp.py"],
     excludes=_excludes,
 )
 

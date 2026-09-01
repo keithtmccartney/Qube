@@ -33,6 +33,7 @@ def test_linux_app_paths_use_opt_qube():
 
 
 def test_user_data_paths_use_qube_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "linux")
     data_root = tmp_path / "qube-data"
     _patch_user_data_root(monkeypatch, data_root)
     assert user_data_paths() == [data_root]
@@ -80,6 +81,16 @@ def test_uninstall_targets_can_skip_user_data(monkeypatch, tmp_path):
     targets = uninstall_targets(include_user_data=False)
     assert tmp_path / ".qube" not in targets
     assert Path("/Applications/Qube.app") in targets
+
+
+def test_user_data_paths_include_dot_qube_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    local_qube = tmp_path / "AppData" / "Local" / "Qube"
+    _patch_user_data_root(monkeypatch, local_qube)
+    paths = user_data_paths()
+    assert local_qube in paths
+    assert tmp_path / ".qube" in paths
 
 
 def test_homebrew_zap_paths_use_tilde_prefix(monkeypatch, tmp_path):
