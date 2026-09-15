@@ -36,6 +36,9 @@ def test_installed_and_upgrade_smoke_use_shared_launch_env():
     assert "Install-QubeSilentSetup" in upgrade
     cuda = (root / "smoke_installed_cuda.ps1").read_text(encoding="utf-8")
     assert "Install-QubeSilentSetup" in cuda
+    assert "Explicit smoke validation (--winget-validation)" in cuda
+    assert 'Wait-ValidationSmokeResult -Process $smokeProc -ExpectedMode "smoke"' in cuda
+    assert "Phase 2: WinGet install-grace launch" not in cuda
 
 
 def test_smoke_dist_cuda_skips_runtime_launch():
@@ -44,3 +47,14 @@ def test_smoke_dist_cuda_skips_runtime_launch():
     assert "verify_windows_cuda_bundle.ps1" in text
     assert '$variant -eq "cuda"' in text
     assert "--winget-validation" not in text
+
+
+def test_release_workflow_publishes_windows_checksums():
+    workflow = (
+        Path(__file__).resolve().parent.parent / ".github" / "workflows" / "release.yml"
+    ).read_text(encoding="utf-8")
+    assert "write_windows_installer_checksums.py" in workflow
+    assert "SHA256SUMS.txt" in workflow
+    assert "steps.checksums.outputs.cpu_sha256" in workflow
+    assert "steps.checksums.outputs.vulkan_sha256" in workflow
+    assert "steps.checksums.outputs.cuda_sha256" in workflow

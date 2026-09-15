@@ -120,7 +120,7 @@ BOOTSTRAP_MODELS: dict[BootstrapModelId, BootstrapModelSpec] = {
         locked_in_recommended=False,
         default_recommended=True,
         default_advanced=False,
-        source_display="huggingface.co/hexgrad/Kokoro-82M",
+        source_display="github.com/thewh1teagle/kokoro-onnx",
     ),
     BootstrapModelId.SEARCH_PRESET_BALANCED: BootstrapModelSpec(
         model_id=BootstrapModelId.SEARCH_PRESET_BALANCED,
@@ -184,9 +184,9 @@ BOOTSTRAP_MODELS: dict[BootstrapModelId, BootstrapModelSpec] = {
         default_advanced=False,
         hint_level=BootstrapHintLevel.INFO,
         hint_in_recommended=True,
-        hf_repo="bartowski/nvidia_Nemotron-3-Nano-4B-BF16-GGUF",
+        hf_repo="unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF",
         hf_filename="NVIDIA-Nemotron-3-Nano-4B-Q8_0.gguf",
-        source_display="huggingface.co/bartowski/nvidia_Nemotron-3-Nano-4B-BF16-GGUF",
+        source_display="huggingface.co/unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF",
     ),
 }
 

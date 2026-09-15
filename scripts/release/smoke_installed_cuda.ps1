@@ -1,4 +1,4 @@
-# Silent install, launch CUDA build with WinGet validation guard, verify no llama_cpp import.
+# Silent install, launch CUDA build with explicit WinGet validation guard, verify no llama_cpp import.
 param(
     [string]$SetupPath = ""
 )
@@ -31,6 +31,12 @@ $bootStatePath = Join-Path $userData ".winget-validation-boot-state.json"
 $bootTracePath = Join-Path $userData ".winget-validation-boot-trace.jsonl"
 $dummyGguf = Join-Path $cognitionDir "Qwen3-1.7B-Q6_K.gguf"
 
+function Clear-ValidationDiagnostics {
+    Remove-Item $resultPath -Force -ErrorAction SilentlyContinue
+    Remove-Item $bootStatePath -Force -ErrorAction SilentlyContinue
+    Remove-Item $bootTracePath -Force -ErrorAction SilentlyContinue
+}
+
 function Format-SmokeFailureMessage {
     param(
         [string]$ResultPath,
@@ -41,6 +47,7 @@ function Format-SmokeFailureMessage {
     if (Test-Path $ResultPath) {
         try {
             $result = Get-Content $ResultPath -Raw | ConvertFrom-Json
+            if ($result.mode) { $parts += "mode=$($result.mode)" }
             if ($result.stage) { $parts += "stage=$($result.stage)" }
             if ($result.error) { $parts += "error=$($result.error)" }
             if ($null -ne $result.ok) { $parts += "ok=$($result.ok)" }
@@ -71,6 +78,47 @@ function Format-SmokeFailureMessage {
     return ($parts -join "; ")
 }
 
+function Wait-ValidationSmokeResult {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [string]$ExpectedMode,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if ($Process.HasExited) {
+            $msg = Format-SmokeFailureMessage `
+                -ResultPath $resultPath `
+                -BootStatePath $bootStatePath `
+                -BootTracePath $bootTracePath
+            throw "Installed CUDA app exited early (exit code: $($Process.ExitCode)). $msg"
+        }
+        if (Test-Path $resultPath) {
+            $result = Get-Content $resultPath -Raw | ConvertFrom-Json
+            if ($ExpectedMode -and $result.mode -ne $ExpectedMode) {
+                Start-Sleep -Seconds 1
+                continue
+            }
+            if (-not $result.ok) {
+                $msg = Format-SmokeFailureMessage `
+                    -ResultPath $resultPath `
+                    -BootStatePath $bootStatePath `
+                    -BootTracePath $bootTracePath
+                throw $msg
+            }
+            return $result
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    $msg = Format-SmokeFailureMessage `
+        -ResultPath $resultPath `
+        -BootStatePath $bootStatePath `
+        -BootTracePath $bootTracePath
+    throw "Timed out waiting for validation smoke result at $resultPath. $msg"
+}
+
 Install-QubeSilentSetup -SetupPath $setup.FullName
 
 if (-not (Test-Path $installedExe)) {
@@ -78,10 +126,9 @@ if (-not (Test-Path $installedExe)) {
 }
 Write-Host "Silent install verified at $installedExe"
 
-$installMarker = Join-Path $installDir ".qube-install-ts"
-if (-not (Test-Path $installMarker)) {
-    throw "Missing CUDA install grace marker: $installMarker"
-}
+Clear-ValidationDiagnostics
+
+Write-Host "Explicit smoke validation (--winget-validation)..."
 
 # Simulate a validation VM with completed bootstrap and a sidecar model on disk.
 New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
@@ -94,46 +141,21 @@ Set-Content -Path $dummyGguf -Value "dummy" -Encoding ascii
 }
 '@ | Set-Content -Path $settingsPath -Encoding utf8NoBOM
 
-Remove-Item $resultPath -Force -ErrorAction SilentlyContinue
-Remove-Item $bootStatePath -Force -ErrorAction SilentlyContinue
-Remove-Item $bootTracePath -Force -ErrorAction SilentlyContinue
-
-Write-Host "Launching installed CUDA EXE with WinGet validation guard..."
 $env:QUBE_WINGET_VALIDATION = "1"
-$proc = Start-Process -FilePath $installedExe `
+$smokeProc = Start-Process -FilePath $installedExe `
     -ArgumentList "--mock-bootstrap-download", "--winget-validation" `
     -PassThru
 
 try {
-    $deadline = (Get-Date).AddSeconds(120)
-    while ((Get-Date) -lt $deadline) {
-        if ($proc.HasExited) {
-            $msg = Format-SmokeFailureMessage -ResultPath $resultPath -BootStatePath $bootStatePath -BootTracePath $bootTracePath
-            throw "Installed CUDA app exited early (exit code: $($proc.ExitCode)). $msg"
-        }
-        if (Test-Path $resultPath) {
-            $result = Get-Content $resultPath -Raw | ConvertFrom-Json
-            if (-not $result.ok) {
-                $msg = Format-SmokeFailureMessage -ResultPath $resultPath -BootStatePath $bootStatePath -BootTracePath $bootTracePath
-                throw $msg
-            }
-            break
-        }
-        Start-Sleep -Seconds 1
-    }
-
-    if (-not (Test-Path $resultPath)) {
-        $msg = Format-SmokeFailureMessage -ResultPath $resultPath -BootStatePath $bootStatePath -BootTracePath $bootTracePath
-        throw "Timed out waiting for validation smoke result at $resultPath. $msg"
-    }
-
-    $result = Get-Content $resultPath -Raw | ConvertFrom-Json
-    if (-not $result.ok -or $result.llama_import_attempted) {
-        $msg = Format-SmokeFailureMessage -ResultPath $resultPath -BootStatePath $bootStatePath -BootTracePath $bootTracePath
+    $smokeResult = Wait-ValidationSmokeResult -Process $smokeProc -ExpectedMode "smoke"
+    if ($smokeResult.llama_import_attempted) {
+        $msg = Format-SmokeFailureMessage `
+            -ResultPath $resultPath `
+            -BootStatePath $bootStatePath `
+            -BootTracePath $bootTracePath
         throw "WinGet validation guard failed: llama_cpp import was attempted. $msg"
     }
-
-    Write-Host "CUDA WinGet validation smoke passed (pid $($proc.Id), stage $($result.stage), no llama_cpp import)"
+    Write-Host "CUDA validation smoke passed (pid $($smokeProc.Id), stage $($smokeResult.stage), no llama_cpp import)"
 
     Invoke-QubeSilentUninstallWhileRunning `
         -Uninstaller $uninstaller `
@@ -141,5 +163,6 @@ try {
     Write-Host "CUDA validation smoke + uninstall verified"
 }
 finally {
-    Stop-QubeProcessIfRunning -Process $proc
+    Stop-QubeProcessIfRunning -Process $smokeProc
+    Remove-Item Env:QUBE_WINGET_VALIDATION -ErrorAction SilentlyContinue
 }

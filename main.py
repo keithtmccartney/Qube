@@ -545,6 +545,8 @@ class Qube:
                 sv._sync_active_tts_label()
             if hasattr(sv, "_refresh_tts_model_list"):
                 sv._refresh_tts_model_list()
+            if hasattr(sv, "_sync_tts_voice_controls_state"):
+                sv._sync_tts_voice_controls_state()
 
     def _wire_library_app_routes(self) -> None:
         lv = self.window.peek_library_view()
@@ -1631,7 +1633,6 @@ def run_application(
     from core.winget_validation import (
         apply_winget_validation_bootstrap_shortcut,
         configure_winget_validation_mode,
-        is_winget_smoke_validation,
         is_winget_validation_mode,
         log_validation_startup_summary,
         write_smoke_result,
@@ -1810,8 +1811,11 @@ def run_application(
         )
 
     def _on_qube_ready(qube: Qube) -> None:
+        from core.platform.macos_dock import install_macos_dock_reopen_handler
+
         activation_target["qube"] = qube
         qube.window._qube = qube
+        install_macos_dock_reopen_handler(qube.window._restore_workspace_from_tray)
         if is_bootstrap_completed():
             if hasattr(qube.window, "voice_input_toggle"):
                 qube.window.voice_input_toggle.setChecked(get_voice_input_default())
@@ -1847,7 +1851,7 @@ def run_application(
             from PyQt6.QtCore import QTimer
 
             QTimer.singleShot(0, lambda: qube.window.handle_startup_autoload_outcome(outcome))
-        if is_winget_smoke_validation():
+        if is_winget_validation_mode():
             write_smoke_result(boot_complete=True)
         from PyQt6.QtCore import QTimer
 
@@ -1856,7 +1860,7 @@ def run_application(
         QTimer.singleShot(450, qube.window.maybe_show_whats_new)
 
     # Keep a strong reference; otherwise StartupSplashController is GC'd and startup timers never fire.
-    if is_winget_smoke_validation():
+    if is_winget_validation_mode():
         record_startup_progress(
             "before_splash_bootstrap",
             mock_downloads=bool(args.mock_bootstrap_download),

@@ -1,5 +1,53 @@
 ## [Unreleased]
 
+## [1.3.51] - 2026-09-11
+
+### Added
+- **WinGet / Defender docs:** investigation playbook and WDSI submission guide for CUDA `Validation-Defender-Error`.
+- **Release checksums:** publish SHA-256 for all Windows installers in GitHub Release notes and attach `SHA256SUMS.txt`.
+
+### Fixed
+- **CUDA first-run bootstrap:** Remove the 20-minute post-install “install grace” path that skipped bootstrap consent and model downloads on fresh CUDA installs (including GitHub downloads and the installer’s Launch Qube step). First launch now runs the normal bootstrap flow. Explicit `--winget-validation` remains for release CI smoke only.
+
+## [1.3.50] - 2026-09-04
+
+### Fixed
+- **TTS Kokoro inference:** Upgrade `kokoro-onnx` to 0.6.1 so the `speed` input matches the bundled `kokoro-v1.0.onnx` model (float32). Fixes ONNX Runtime `INVALID_ARGUMENT` errors during voice preview and playback on installed builds.
+
+## [1.3.49] - 2026-09-03
+
+### Fixed
+- **TTS voice preview (Windows):** Use Kokoro's synchronous `create()` API instead of async `create_stream()` so the TTS worker does not hang on Windows and block Settings preview / output test buttons.
+- **TTS output device fallback:** When the selected output device is unavailable, persist the working system-default device for playback instead of retrying the bad index on every preview.
+- **TTS preview diagnostics:** Log Settings preview requests, queueing, playback failures, and completion in `Qube.Audio`.
+
+## [1.3.48] - 2026-09-03
+
+### Fixed
+- **TTS (installed builds):** Bundle Kokoro dependency assets in PyInstaller — `language_tags`, `phonemizer`, and `espeakng_loader` (native library + espeak-ng-data) — so TTS loads on Windows, macOS, and Linux frozen builds.
+- **Bootstrap Nemotron download:** Point Nemotron 3 Nano 4B Q8 at the public `unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF` repo (fixes 401 Unauthorized from the gated `bartowski/...-BF16-GGUF` catalogue entry).
+
+## [1.3.47] - 2026-09-03
+
+### Fixed
+- **Windows audio devices:** Filter duplicate PortAudio endpoints (prefer WASAPI) so Settings input/output lists align with Windows Sound; refresh device menus when opened so hot-plugged USB/Bluetooth devices appear without restart.
+- **TTS voice settings (Windows):** Load Kokoro when ONNX + voices are on disk even if the PyAudio output stream fails at boot; retry with the system default output device; auto-reload when opening Voice & Audio or using TTS Refresh; disable the voice picker and preview buttons until the engine is ready; surface specific load/preview errors instead of a generic message.
+- **Bootstrap consent:** Allow feasibility checks to skip RAM enforcement when appropriate so low-memory sessions can still proceed with disk-only guidance.
+- **Light theme splash:** Improve splash card text contrast on light backgrounds.
+
+## [1.3.46] - 2026-09-02
+
+### Fixed
+- **Kokoro TTS download (bootstrap + Settings):** ONNX assets now download from the official `thewh1teagle/kokoro-onnx` GitHub release instead of removed files on `hexgrad/Kokoro-82M` (fixes 404 on first-run bootstrap and **Download base TTS model**).
+- **Composer `@[file:…]` mentions:** exclude the built-in Qube help corpus from file picker results; ignore tool/category routing tokens when filtering filenames.
+- **Frameless modals (Windows/Linux):** centralize prestige-style dialog chrome so borders and translucency re-apply reliably after the native window handle exists.
+- **Windows silent uninstall wipe:** Inno Setup supports `/DELETEUSERDATA=1` to remove `%LOCALAPPDATA%\Qube` and `%USERPROFILE%\.qube` during silent uninstall; fix `{userprofile}` expansion via `{%USERPROFILE}`.
+- **WinGet install grace:** post-install validation runs without mock bootstrap downloads; diagnostics distinguish smoke vs install-grace paths and write grace boot traces for CUDA release CI.
+- **Dependencies:** bump `pypdf` to 6.16.1 (CVE-2026-84309/84310/84311).
+
+### Added
+- **Release CI (CUDA):** richer WinGet validation smoke failure output (mode, grace trace) and clearer wait/retry handling in `smoke_installed_cuda.ps1`.
+
 ## [1.3.45] - 2026-08-31
 
 ### Added

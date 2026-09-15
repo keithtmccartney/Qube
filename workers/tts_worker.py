@@ -31,8 +31,7 @@ def _pcm_peak_level(pcm: bytes) -> float:
 def ensure_bundled_kokoro_assets(model_path: str, *, allow_download: bool = False) -> None:
     """Ensure Kokoro ONNX + voices exist locally; download only when explicitly allowed."""
     from core.tts_models import (
-        BUNDLED_DEFAULT_FILENAME,
-        BUNDLED_VOICES_FILENAME,
+        KOKORO_BUNDLED_ASSETS,
         bundled_default_path,
         is_protected_tts_model,
     )
@@ -43,12 +42,8 @@ def ensure_bundled_kokoro_assets(model_path: str, *, allow_download: bool = Fals
     base_dir = os.path.dirname(bundled_default_path())
     os.makedirs(base_dir, exist_ok=True)
 
-    onnx_path = os.path.join(base_dir, BUNDLED_DEFAULT_FILENAME)
-    bin_path = os.path.join(base_dir, BUNDLED_VOICES_FILENAME)
-
     files_to_check = {
-        onnx_path: "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/kokoro-v1.0.onnx",
-        bin_path: "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/voices-v1.0.bin",
+        os.path.join(base_dir, filename): url for filename, url in KOKORO_BUNDLED_ASSETS
     }
 
     for file_path, url in files_to_check.items():
@@ -59,7 +54,8 @@ def ensure_bundled_kokoro_assets(model_path: str, *, allow_download: bool = Fals
                     "(download from Settings → Voice & Audio or first-run bootstrap)."
                 )
             print(f"[SYSTEM] Downloading missing required file: {os.path.basename(file_path)}...")
-            response = requests.get(url, stream=True)
+            response = requests.get(url, stream=True, timeout=(30, 300))
+            response.raise_for_status()
             with open(file_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
@@ -107,34 +103,18 @@ class KokoroAdapter:
         self.available_voices = voices_data.files
 
     def synthesize(self, text, voice_name):
-        import asyncio
-        import threading
-        import queue
-        
-        audio_queue = queue.Queue()
-
-        async def fetch_stream():
-            try:
-                # Kokoro-ONNX supports streaming chunks
-                stream = self.engine.create_stream(text, voice=voice_name, speed=1.0, lang="en-us")
-                async for samples, _ in stream:
-                    pcm_data = (samples * 32767).astype(np.int16).tobytes()
-                    audio_queue.put(pcm_data)
-            except Exception as e:
-                audio_queue.put(e)
-            finally:
-                audio_queue.put(None) 
-
-        def run_async():
-            asyncio.run(fetch_stream())
-
-        threading.Thread(target=run_async, daemon=True).start()
-
-        while True:
-            chunk = audio_queue.get()
-            if chunk is None: break
-            if isinstance(chunk, Exception): raise chunk
-            yield chunk
+        # Use Kokoro's synchronous API. The async create_stream path nests asyncio.run()
+        # in a helper thread and can hang on Windows, blocking the TTS worker queue.
+        samples, _sample_rate = self.engine.create(
+            text,
+            voice=voice_name,
+            speed=1.0,
+            lang="en-us",
+        )
+        pcm_data = (samples * 32767).astype(np.int16).tobytes()
+        chunk_size = 8192
+        for offset in range(0, len(pcm_data), chunk_size):
+            yield pcm_data[offset : offset + chunk_size]
 
 
 class TTSWorker(QThread):
@@ -155,6 +135,8 @@ class TTSWorker(QThread):
         self.active_adapter = None
         self.active_voice_name = "Default"
         self.current_device_index = None
+        self._last_load_error: str | None = None
+        self._last_stream_error: str | None = None
         self._last_playback_level_emit = 0.0
         
         # --- NEW: Voice Bypass Flag ---
@@ -181,8 +163,16 @@ class TTSWorker(QThread):
 
     def set_device(self, index):
         self.current_device_index = index
-        if self.active_adapter:
-            self.load_voice(self.model_path) 
+        if not self.active_adapter:
+            return
+        try:
+            self.stream = self._open_output_stream(self.active_adapter.sample_rate)
+            self._last_stream_error = None
+        except Exception as exc:
+            self.stream = None
+            self._last_stream_error = str(exc)
+            logger.warning("[TTS] Failed to reopen output stream for device %s: %s", index, exc)
+            self.status_update.emit(f"TTS output device unavailable: {exc}")
             
     def set_voice(self, voice_name):
         self.active_voice_name = voice_name
@@ -190,6 +180,71 @@ class TTSWorker(QThread):
 
     def _normalize_tts_queue_key(self, text: str) -> str:
         return " ".join(str(text or "").split()).strip().lower()
+
+    def _close_output_stream(self) -> None:
+        if not self.stream:
+            return
+        try:
+            self.stream.stop_stream()
+            self.stream.close()
+        except Exception:
+            pass
+        self.stream = None
+
+    def _open_output_stream(self, sample_rate: int):
+        """Open the PyAudio output stream, falling back to the system default device."""
+        requested_device = self.current_device_index
+        device_candidates: list[int | None] = []
+        if requested_device is not None:
+            device_candidates.append(requested_device)
+        if None not in device_candidates:
+            device_candidates.append(None)
+
+        last_error: Exception | None = None
+        for device_index in device_candidates:
+            try:
+                stream = self.audio.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=sample_rate,
+                    output=True,
+                    output_device_index=device_index,
+                    frames_per_buffer=1024,
+                )
+                if device_index != requested_device:
+                    logger.warning(
+                        "[TTS] Output device %s unavailable; using system default.",
+                        requested_device,
+                    )
+                    self.current_device_index = device_index
+                return stream
+            except Exception as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("No audio output device available")
+
+    def _ensure_output_stream(self) -> bool:
+        """Ensure an active PyAudio stream exists for the current adapter."""
+        if self.active_adapter is None:
+            return False
+        if self.stream is not None:
+            try:
+                if self.stream.is_active():
+                    return True
+            except Exception:
+                pass
+            self._close_output_stream()
+        try:
+            self.stream = self._open_output_stream(self.active_adapter.sample_rate)
+            self._last_stream_error = None
+            return True
+        except Exception as exc:
+            self.stream = None
+            self._last_stream_error = str(exc)
+            logger.warning("[TTS] Failed to open output stream: %s", exc)
+            self.status_update.emit(f"Failed to open output stream: {exc}")
+            return False
 
     def load_voice(self, model_path) -> bool:
         """Load a TTS ONNX model. Returns True on success; restores the prior adapter on failure."""
@@ -202,6 +257,7 @@ class TTSWorker(QThread):
 
         architecture = classify_tts_architecture(model_path)
         if architecture is None:
+            self._last_load_error = UNSUPPORTED_TTS_ARCHITECTURE_MSG
             self.status_update.emit(f"TTS error: {UNSUPPORTED_TTS_ARCHITECTURE_MSG}")
             return False
 
@@ -211,21 +267,18 @@ class TTSWorker(QThread):
             else:
                 new_adapter = PiperAdapter(model_path)
 
-            if previous_stream:
-                try:
-                    previous_stream.stop_stream()
-                    previous_stream.close()
-                except Exception:
-                    pass
+            self._close_output_stream()
 
-            new_stream = self.audio.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=new_adapter.sample_rate,
-                output=True,
-                output_device_index=self.current_device_index,
-                frames_per_buffer=1024,
-            )
+            try:
+                new_stream = self._open_output_stream(new_adapter.sample_rate)
+                self._last_stream_error = None
+            except Exception as stream_exc:
+                new_stream = None
+                self._last_stream_error = str(stream_exc)
+                logger.warning(
+                    "[TTS] Model loaded but output stream unavailable (will retry on playback): %s",
+                    stream_exc,
+                )
 
             self.model_path = model_path
             self.active_adapter = new_adapter
@@ -236,8 +289,14 @@ class TTSWorker(QThread):
                 self.active_adapter.available_voices
             )
 
+            self._last_load_error = None
             self.model_loaded.emit(os.path.basename(model_path), self.active_adapter.available_voices)
-            self.status_update.emit(f"TTS Engine Ready ({self.active_adapter.sample_rate}Hz)")
+            if new_stream is not None:
+                self.status_update.emit(f"TTS Engine Ready ({self.active_adapter.sample_rate}Hz)")
+            else:
+                self.status_update.emit(
+                    "TTS model loaded; select a working output device before playback."
+                )
             return True
 
         except Exception as e:
@@ -245,6 +304,7 @@ class TTSWorker(QThread):
             self.model_path = previous_path
             self.active_voice_name = previous_voice
             self.stream = previous_stream
+            self._last_load_error = str(e)
             logger.exception("[TTS] Failed to load model %s: %s", model_path, e)
             self.status_update.emit(f"Failed to load TTS model: {e}")
             return False
@@ -268,8 +328,18 @@ class TTSWorker(QThread):
 
     def queue_voice_preview(self, text: str) -> None:
         """Play a short sample in Settings; ignores mute and chat playback UI."""
-        if not text or not text.strip() or not self.active_adapter:
+        if not text or not text.strip():
+            logger.info("[TTS] Voice preview skipped — empty phrase.")
             return
+        if not self.active_adapter:
+            logger.warning("[TTS] Voice preview skipped — TTS engine not loaded.")
+            return
+        logger.info(
+            "[TTS] Queueing voice preview (%d chars, voice=%s, device=%s).",
+            len(text.strip()),
+            self.active_voice_name,
+            self.current_device_index,
+        )
         self._interrupt_tts = True
         self._last_queued_tts_key = ""
         if hasattr(self, "sentence_queue"):
@@ -356,24 +426,7 @@ class TTSWorker(QThread):
                     continue
 
                 if getattr(self, 'stream', None) is None:
-                    try:
-                        if getattr(self, 'pyaudio_instance', None) is None:
-                            self.pyaudio_instance = pyaudio.PyAudio()
-
-                        sample_rate = (
-                            self.active_adapter.sample_rate
-                            if self.active_adapter is not None
-                            else 24000
-                        )
-                        self.stream = self.pyaudio_instance.open(
-                            format=pyaudio.paInt16,
-                            channels=1,
-                            rate=sample_rate,
-                            output=True,
-                            output_device_index=self.current_device_index,
-                        )
-                    except Exception as e:
-                        self.status_update.emit(f"Failed to rebuild stream: {e}")
+                    if not self._ensure_output_stream():
                         continue
 
                 self.status_update.emit("🔊 Previewing voice..." if voice_preview else "🔊 Speaking...")
@@ -409,9 +462,11 @@ class TTSWorker(QThread):
                             self.stream.write(chunk)
 
                 except Exception as e:
+                    logger.exception("[TTS] Playback failed: %s", e)
                     self.status_update.emit(f"Audio Error: {e}")
 
                 if voice_preview:
+                    logger.info("[TTS] Voice preview finished.")
                     self.playback_level.emit(0.0)
                     continue
 

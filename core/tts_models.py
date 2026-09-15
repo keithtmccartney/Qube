@@ -21,6 +21,18 @@ logger = logging.getLogger("Qube.TTSModels")
 BUNDLED_DEFAULT_FILENAME = "kokoro-v1.0.onnx"
 BUNDLED_VOICES_FILENAME = "voices-v1.0.bin"
 BUNDLED_TTS_LABEL = "Kokoro v1.0 (bundled default)"
+# ONNX assets ship with thewh1teagle/kokoro-onnx releases (not hexgrad/Kokoro-82M on HF).
+KOKORO_DOWNLOAD_RELEASE = "model-files-v1.1"
+KOKORO_DOWNLOAD_BASE = (
+    f"https://github.com/thewh1teagle/kokoro-onnx/releases/download/{KOKORO_DOWNLOAD_RELEASE}"
+)
+KOKORO_ONNX_DOWNLOAD_URL = f"{KOKORO_DOWNLOAD_BASE}/{BUNDLED_DEFAULT_FILENAME}"
+KOKORO_VOICES_DOWNLOAD_URL = f"{KOKORO_DOWNLOAD_BASE}/{BUNDLED_VOICES_FILENAME}"
+KOKORO_DOWNLOAD_SOURCE_DISPLAY = "github.com/thewh1teagle/kokoro-onnx"
+KOKORO_BUNDLED_ASSETS: tuple[tuple[str, str], ...] = (
+    (BUNDLED_DEFAULT_FILENAME, KOKORO_ONNX_DOWNLOAD_URL),
+    (BUNDLED_VOICES_FILENAME, KOKORO_VOICES_DOWNLOAD_URL),
+)
 DEFAULT_KOKORO_VOICE = "af_heart"
 TTS_SUBDIR = "tts"
 SUPPORTED_TTS_ENGINES = ("Kokoro ONNX", "Piper ONNX")
@@ -169,6 +181,29 @@ def any_supported_tts_model_on_disk() -> bool:
         if ok:
             return True
     return False
+
+
+def describe_tts_model_disk_state() -> tuple[bool, str]:
+    """Return whether valid TTS assets exist on disk and a short user-facing detail."""
+    for entry in list_selectable_tts_models():
+        if not os.path.isfile(entry.path):
+            continue
+        ok, msg = validate_tts_model_path(entry.path)
+        if ok:
+            return True, ""
+        if msg:
+            return False, msg
+
+    bundled = bundled_default_path()
+    ok, msg = validate_tts_model_path(bundled)
+    if msg:
+        return False, msg
+    return (
+        False,
+        f"Missing Kokoro files in {get_tts_models_dir()}. "
+        f"Download {BUNDLED_DEFAULT_FILENAME} and {BUNDLED_VOICES_FILENAME}, "
+        "or add a supported Piper .onnx model.",
+    )
 
 
 def resolve_boot_tts_path() -> str:
