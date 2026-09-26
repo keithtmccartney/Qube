@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+### Fixed
+- **WinGet submit:** Verify the `winget-pkgs` fork is synced with upstream before `wingetcreate submit`, and document manual sync via `gh api merge-upstream` when the PAT lacks the `workflow` scope.
+- **Dependencies:** Bump `anyio` to 4.14.2 (CVE-2026-63374, CVE-2026-64847).
+- **Chocolatey:** Use PNG package icon, fail `choco push` on non-zero exit codes, add `chocolatey-submit` workflow and CUDA moderation recovery docs (`docs/chocolatey_cuda_moderation.md`).
+
+## [1.3.53] - 2026-09-17
+
+### Fixed
+- **Web search:** Fix `UnboundLocalError` on `@internet` / WEB routes caused by a shadowed `get_retrieval_profile` import in `LLMWorker`.
+- **Web search (@internet):** Stop injecting the “internet disabled” system prompt when composer `@internet` forces a live search while the global internet toggle is off.
+- **Web answers:** Detect cross-source epistemic conflicts (e.g. scheduled vs completed outcome snippets) in general-web bundles and add synthesis guidance so the model does not merge incompatible claims.
+- **Settings (form layout):** Improve card form row sizing on macOS and narrow layouts — top-aligned multi-line labels, wrapped path/status text, and tighter vertical sizing for toggles and action rows.
+- **CI (Windows):** Refit settings selector width in layout tests after `show()` so font metrics match production and widest labels are not elided on Windows.
+- **Release CI:** Pin `action-gh-release` to v2.6.0, upload assets sequentially, delete orphan draft releases before publish, and upload large Windows installers last to avoid concurrent asset upload failures.
+- **Dependencies:** Bump `soupsieve` to 2.9.2 (CVE-2026-85999, CVE-2026-86000).
+- **Updates:** Manual update fallback now points users to both the Qube website and GitHub Releases; Linux AppImage detection reads `APPIMAGE` via `os.environ`.
+
+## [1.3.52] - 2026-09-16
+
+### Fixed
+- **macOS Dock:** Restore the main window when the Dock icon is clicked after hide-to-tray (red X), without affecting menu bar tray or Desktop Companion single-click use.
+- **Settings (macOS):** AI Engine and local model rows expand to the full card width on narrow layouts instead of collapsing left.
+
+### Changed
+- **WinGet auto-submit:** Sync the fork before opening PRs; skip submit when an open PR already exists for the version; document PAT requirements and tolerate sync failure without failing the release job.
+
 ## [1.3.51] - 2026-09-11
 
 ### Added
